@@ -1,0 +1,2 @@
+# Add one publicly accessible HTTPS video URL per line.
+# Instagram's API must be able to fetch each video.

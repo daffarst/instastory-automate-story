@@ -1,0 +1,4 @@
+.story_scheduler_state.json
+.story_scheduler_state.json.tmp
+videos/*
+!videos/.gitkeep
