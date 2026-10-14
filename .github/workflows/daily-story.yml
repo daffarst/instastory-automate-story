@@ -1,0 +1,73 @@
+name: Daily Instagram Story
+
+on:
+  schedule:
+    # Every 15 minutes; the script decides if a Story is due (see schedule.json).
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run only picks a video; publish-now uploads one immediately"
+        type: choice
+        options:
+          - dry-run
+          - publish-now
+        default: dry-run
+
+permissions:
+  contents: write
+
+concurrency:
+  group: instagram-story
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dry run
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'dry-run'
+        run: python3 cloud_run.py --dry-run
+
+      - name: Check whether a Story is due
+        id: check
+        if: github.event_name == 'schedule' || inputs.mode == 'publish-now'
+        run: python3 cloud_run.py --check ${{ inputs.mode == 'publish-now' && '--force' || '' }}
+
+      - name: Start tunnel
+        if: steps.check.outputs.due == 'true'
+        run: |
+          curl -fsSL -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+          nohup ./cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8787 > tunnel.log 2>&1 &
+          url=""
+          for _ in $(seq 1 30); do
+            url=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -n1 || true)
+            [ -n "$url" ] && break
+            sleep 2
+          done
+          if [ -z "$url" ]; then cat tunnel.log; exit 1; fi
+          sleep 5
+          echo "IG_PUBLIC_MEDIA_BASE_URL=$url" >> "$GITHUB_ENV"
+
+      - name: Publish Story
+        if: steps.check.outputs.due == 'true'
+        env:
+          IG_USER_ID: ${{ secrets.IG_USER_ID }}
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_GRAPH_API_VERSION: ${{ secrets.IG_GRAPH_API_VERSION }}
+        run: python3 cloud_run.py
+
+      - name: Save state
+        if: always() && steps.check.outputs.due == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloud_state.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "Update story state [skip ci]"
+          git pull --rebase
+          git push

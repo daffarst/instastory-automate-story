@@ -67,6 +67,72 @@ as well; a cron job may not inherit variables from an interactive terminal.
 Keep the tunnel active. The script will skip a second run on the same local
 calendar day.
 
+## Web UI (set the upload time in a browser)
+
+`web_app.py` runs a small local web page and a built-in scheduler. Each day, at
+the time you choose, it picks **one random video** from the `videos/` folder and
+publishes it as a Story. Videos are not repeated until every video in the folder
+has been used once.
+
+1. Put videos in `videos/` and set the four `IG_*` environment variables
+   described above, then start the tunnel.
+2. Start the app and keep it running:
+
+   ```sh
+   python web_app.py
+   ```
+
+   Options: `--folder videos`, `--port 8000`, `--state .web_scheduler_state.json`.
+3. Open <http://127.0.0.1:8000>, choose the upload time, tick "Aktifkan", and
+   press **Simpan**.
+
+The page also has **Tes pilih video** (shows which video would be chosen,
+without uploading) and **Upload sekarang** (publishes immediately and counts as
+today's Story). Only one Story is published per local calendar day. If the app
+starts after the scheduled time and today's Story has not been published, it
+publishes right away; a failed upload is retried every 15 minutes, up to 3 times
+per day. The page listens on `127.0.0.1` only and the API token is read from
+environment variables, never stored by the web page. The computer and app must
+be running at the scheduled time.
+
+## Run in the cloud (computer can be off)
+
+The workflow [daily-story.yml](.github/workflows/daily-story.yml) runs on GitHub's
+servers, so your computer and `web_app.py` do not need to be on. Every 15 minutes
+it checks [schedule.json](schedule.json); once the scheduled time has passed and
+no Story has been published today, it opens a temporary Cloudflare tunnel,
+publishes one random video from `videos/` (no repeats until all are used) and
+commits `cloud_state.json` back to the repo.
+
+Setup:
+
+1. Commit your videos into `videos/` (each under 100 MB) and push. Use a
+   **private** repository: anyone who can see the repo can see the videos.
+2. In the repo go to *Settings → Secrets and variables → Actions* and add the
+   secrets `IG_USER_ID`, `IG_ACCESS_TOKEN` and `IG_GRAPH_API_VERSION`.
+   (`IG_PUBLIC_MEDIA_BASE_URL` is created automatically by the workflow.)
+3. Edit `schedule.json` (you can do it on github.com) to change the time:
+
+   ```json
+   {"enabled": true, "time": "09:00", "timezone": "Asia/Jakarta"}
+   ```
+
+4. Test under *Actions → Daily Instagram Story → Run workflow* with `dry-run`
+   (shows the chosen video, uploads nothing). `publish-now` uploads one Story
+   immediately and counts as today's Story.
+
+Notes:
+
+- GitHub schedules are best effort: the Story can appear 5-30 minutes after the
+  chosen time. A failed run is retried on the next 15-minute run, up to 3
+  attempts per day, and failed runs show up as red runs in the Actions tab.
+- Do not run the cloud workflow and `web_app.py` scheduling at the same time, or
+  two Stories will be published per day.
+- Instagram access tokens expire (long-lived tokens after about 60 days); update
+  the `IG_ACCESS_TOKEN` secret when that happens.
+- GitHub may pause scheduled workflows in repositories with no activity for 60
+  days; re-enable it in the Actions tab if that happens.
+
 ## Reposting story mentions
 
 The official Instagram API does not provide an endpoint to retrieve another
